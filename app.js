@@ -1,10 +1,10 @@
 // Appraisal Log — non-clinical activity record for NHS appraisal and job planning.
 // Same architecture as PeopleLog: vanilla ES modules, Firebase Auth + Firestore (offline), Gemini REST, no build step.
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 
 // ───────────────────────────────────────────── 1. Firebase
-import { firebaseConfig } from "./firebase-config.js?v=1.1.0";
+import { firebaseConfig } from "./firebase-config.js?v=1.1.1";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
