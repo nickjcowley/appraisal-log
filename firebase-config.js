@@ -2,7 +2,7 @@
 // These values are public by design; security comes from firestore.rules and the API key's HTTP-referrer restriction.
 // apiKey: copy it from Firebase console → Project settings → General → Your apps → Appraisal Log web → SDK setup and configuration → Config.
 export const firebaseConfig = {
-  apiKey: "PASTE_API_KEY",
+  apiKey: "AIzaSyCay8ajgJqEMe7x7KmNaA2P00SssYjoTCw",
   authDomain: "appraisal-log-69cf2.firebaseapp.com",
   projectId: "appraisal-log-69cf2",
   storageBucket: "appraisal-log-69cf2.firebasestorage.app",
