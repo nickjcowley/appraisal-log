@@ -1,11 +1,11 @@
-// Paste the web app config from your Firebase project here
-// (Firebase console → Project settings → General → Your apps → Web app → SDK setup and configuration → Config).
+// Firebase web app config for project appraisal-log-69cf2 ("Appraisal Log web").
 // These values are public by design; security comes from firestore.rules and the API key's HTTP-referrer restriction.
+// apiKey: copy it from Firebase console → Project settings → General → Your apps → Appraisal Log web → SDK setup and configuration → Config.
 export const firebaseConfig = {
   apiKey: "PASTE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  storageBucket: "PASTE_PROJECT_ID.appspot.com",
-  messagingSenderId: "PASTE_SENDER_ID",
-  appId: "PASTE_APP_ID"
+  authDomain: "appraisal-log-69cf2.firebaseapp.com",
+  projectId: "appraisal-log-69cf2",
+  storageBucket: "appraisal-log-69cf2.firebasestorage.app",
+  messagingSenderId: "845283201166",
+  appId: "1:845283201166:web:d415c47b0103fc43b3b9df"
 };
