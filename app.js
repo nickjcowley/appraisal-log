@@ -1,10 +1,10 @@
 // Appraisal Log — non-clinical activity record for NHS appraisal and job planning.
 // Same architecture as PeopleLog: vanilla ES modules, Firebase Auth + Firestore (offline), Gemini REST, no build step.
 
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.2.0";
 
 // ───────────────────────────────────────────── 1. Firebase
-import { firebaseConfig } from "./firebase-config.js?v=1.1.1";
+import { firebaseConfig } from "./firebase-config.js?v=1.2.0";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
@@ -55,7 +55,15 @@ const DEFAULT_TAGS = [
   ["teach", "Teaching & admissions interviews"],
   ["appr", "Appraisal & revalidation"]
 ];
-const DEFAULT_JOBPLAN = { totalPAs: 10.25, spaPAs: 1.5, weeksPerYear: 42, roles: { epr: 1.5 } };
+// Job plan items: each SPA entry is attributed to exactly one item (keywords first, then tags, in item order);
+// untagged entries go to the core item; tagged entries that match nothing are "not in job plan".
+const DEFAULT_ITEMS = {
+  forum: { name: "ICU forum (monthly half-day)", pas: 0.2857, unlogged: null, tags: {}, keywords: "ICU forum", core: false, order: 0 },
+  digital: { name: "Digital lead (ICU EPR / ICCA, AI and digital projects)", pas: 1.5, unlogged: null, tags: { epr: true, ai: true }, keywords: "", core: false, order: 1 },
+  core: { name: "Core SPA (CPD, appraisal, revalidation, teaching, audit)", pas: 2, unlogged: null,
+    tags: { appr: true, teach: true, "halo-sed": true, "halo-res": true, research: true }, keywords: "", core: true, order: 2 }
+};
+const DEFAULT_JOBPLAN = { totalPAs: 10.25, weeksPerYear: 42, unloggedFrom: "2026-07-01", items: DEFAULT_ITEMS };
 const DEFAULT_MODEL = "gemini-flash-latest";
 const DRAFT_KEY = "appraisallog-draft";
 const PAGE = 100;
@@ -199,10 +207,13 @@ function workingWeeks(p) {
 }
 function periodStats(p) {
   const list = [...state.entries.values()].filter(e => inPeriod(e, p));
-  const byCode = {}, byTag = {};
+  const byCode = {}, byTag = {}, byItem = {};
   let spaHours = 0, cxHours = 0;
+  const items = jobItems();
   for (const e of list) {
     const hrs = +e.hours || 0;
+    const it = itemOf(e, items);
+    if (it) { (byItem[it] ||= { n: 0, hours: 0, list: [] }); byItem[it].n++; byItem[it].hours += hrs; byItem[it].list.push(e); }
     (byCode[e.code] ||= { n: 0, hours: 0, list: [] });
     byCode[e.code].n++; byCode[e.code].hours += hrs; byCode[e.code].list.push(e);
     if (NON_SPA.has(e.code)) cxHours += hrs; else spaHours += hrs;
@@ -219,7 +230,7 @@ function periodStats(p) {
   const ow = p.end && p.end <= from ? 0 : workingWeeks({ start: p.start > from ? p.start : from, end: p.end });
   const hpw = unloggedTotalHpw();
   const unl = { hpw, from, weeks: ow, hours: hpw * ow, paw: hpw * ow / 4 / weeks, keyPaw: k => unloggedHpw(k) * ow / 4 / weeks };
-  return { list, byCode, byTag, spaHours, cxHours, weeks, paw, unl };
+  return { list, byCode, byTag, byItem, spaHours, cxHours, weeks, paw, unl };
 }
 
 // ───────────────────────────────────────────── 6. Auth
@@ -240,6 +251,8 @@ function startListeners() {
     const s = snap.data() || {};
     state.settings = normaliseSettings(s);
     if (!snap.exists() && !snap.metadata.fromCache) seedSettings();
+    else if (snap.exists() && !snap.metadata.fromCache && !s.jobPlan?.items) // one-off upgrade from the v1.1 job plan format
+      saveSettings({ jobPlan: { items: DEFAULT_ITEMS, unloggedFrom: s.jobPlan?.unloggedFrom || "2026-07-01", spaPAs: deleteField(), roles: deleteField(), unlogged: deleteField() } });
     renderAll();
   }));
   state.unsub.push(onSnapshot(userCol("entries"), { includeMetadataChanges: true }, snap => {
@@ -260,7 +273,7 @@ function normaliseSettings(s) {
     geminiApiKey: s.geminiApiKey || "",
     geminiModel: s.geminiModel || DEFAULT_MODEL,
     appraisalDates: s.appraisalDates || {},
-    jobPlan: { ...DEFAULT_JOBPLAN, ...(s.jobPlan || {}), roles: { ...(s.jobPlan?.roles || DEFAULT_JOBPLAN.roles) } },
+    jobPlan: { ...DEFAULT_JOBPLAN, ...(s.jobPlan || {}), items: s.jobPlan?.items || DEFAULT_ITEMS },
     tags: s.tags || Object.fromEntries(DEFAULT_TAGS.map(([id, name], i) => [id, { name, order: i }])),
     reportName: s.reportName || state.user?.displayName || "",
     evidenceBase: s.evidenceBase || "Appraisals COWLEY\\Appraisal 2027"
@@ -598,21 +611,46 @@ function sectionsFor(st) {
   for (const c of CODES) if (st.byCode[c.id]) out.push({ key: "code:" + c.id, name: `${c.id} ${c.label}`, list: st.byCode[c.id].list });
   return out;
 }
-function plannedPAs(tagId) { const v = state.settings.jobPlan.roles?.[tagId]; return v == null || v === "" ? null : +v; }
-// Unlogged time: hours/week the user estimates go on a role (or on general email/admin) without being itemised.
-function unloggedHpw(key) { const v = state.settings.jobPlan.unlogged?.[key]; return v == null || v === "" ? 0 : +v; }
-function unloggedTotalHpw() { return Object.values(state.settings.jobPlan.unlogged || {}).reduce((a, b) => a + (+b || 0), 0); }
+function jobItems() {
+  return Object.entries(state.settings?.jobPlan?.items || {}).map(([id, v]) => ({ id, ...v }))
+    .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+}
+function itemOf(e, items) {
+  if (NON_SPA.has(e.code)) return null;
+  const text = `${e.title || ""} ${e.text || ""}`.toLowerCase();
+  const tg = tagsOf(e);
+  for (const it of items) {
+    const kws = String(it.keywords || "").split(/[;,]/).map(k => k.trim().toLowerCase()).filter(Boolean);
+    if (kws.some(k => text.includes(k))) return it.id;
+    if (tg.some(t => it.tags?.[t])) return it.id;
+  }
+  if (!tg.length) { const core = items.find(i => i.core); if (core) return core.id; }
+  return "_none";
+}
+// Unlogged time: hours/week the user estimates go on a job plan item without being itemised.
+function unloggedHpw(itemId) { const v = state.settings?.jobPlan?.items?.[itemId]?.unlogged; return v == null || v === "" ? 0 : +v; }
+function unloggedTotalHpw() { return jobItems().reduce((a, i) => a + unloggedHpw(i.id), 0); }
 const COVERAGE_NOTE = "This is a log of specific roles and blocks of protected time, not a full timesheet. Email, ad-hoc queries, reading and short unscheduled tasks are mostly not itemised, so logged hours are a minimum.";
 
-function roleRows(st) {
-  const rows = allTags().filter(t => st.byTag[t.id] || plannedPAs(t.id) != null || unloggedHpw(t.id)).map(t => {
-    const v = st.byTag[t.id] || { n: 0, hours: 0 };
-    return { name: t.name, n: v.n, hours: v.hours.toFixed(1), paw: st.paw(v.hours).toFixed(2),
-      est: unloggedHpw(t.id) && st.unl.weeks ? st.unl.keyPaw(t.id).toFixed(2) : "–", planned: plannedPAs(t.id) == null ? "–" : plannedPAs(t.id).toFixed(2) };
+function planRows(st) {
+  const f = x => x.toFixed(2);
+  const rows = jobItems().map(it => {
+    const v = st.byItem[it.id] || { n: 0, hours: 0 };
+    const est = unloggedHpw(it.id) && st.unl.weeks ? st.unl.keyPaw(it.id) : 0;
+    return { name: it.name, planned: it.pas == null || it.pas === "" ? "–" : f(+it.pas), n: v.n, hours: v.hours.toFixed(1),
+      paw: f(st.paw(v.hours)), est: est ? f(est) : "–", total: f(st.paw(v.hours) + est) };
   });
-  if (unloggedHpw("_general") && st.unl.weeks) rows.push({ name: "General email and admin (not role-specific)", n: "", hours: "", paw: "",
-    est: st.unl.keyPaw("_general").toFixed(2), planned: "–" });
+  const none = st.byItem._none;
+  if (none) rows.push({ name: "Not in job plan (e.g. governance, medico-legal)", planned: "–", n: none.n, hours: none.hours.toFixed(1),
+    paw: f(st.paw(none.hours)), est: "–", total: f(st.paw(none.hours)) });
+  const planned = jobItems().reduce((a, i) => a + (+i.pas || 0), 0);
+  rows.push({ name: "Total non-clinical", planned: f(planned), n: st.list.filter(e => !NON_SPA.has(e.code)).length, hours: st.spaHours.toFixed(1),
+    paw: f(st.paw(st.spaHours)), est: st.unl.paw ? f(st.unl.paw) : "–", total: f(st.paw(st.spaHours) + st.unl.paw), bold: true });
   return rows;
+}
+function tagRows(st) {
+  return allTags().filter(t => st.byTag[t.id]).map(t => ({ name: t.name, n: st.byTag[t.id].n,
+    hours: st.byTag[t.id].hours.toFixed(1), paw: st.paw(st.byTag[t.id].hours).toFixed(2) }));
 }
 function renderReport(resetSel) {
   if (!state.reportPeriod || !periods().some(p => p.key === state.reportPeriod)) state.reportPeriod = currentPeriodKey();
@@ -640,15 +678,21 @@ function renderReport(resetSel) {
     unl ? h("tr", {}, h("td", {}, "Unlogged time, estimate (email, ad-hoc and role work not itemised)"), h("td", {}), h("td", { class: "num" }, st.unl.hours.toFixed(0)), h("td", { class: "num" }, st.unl.paw.toFixed(2))) : null,
     unl ? h("tr", {}, h("th", {}, "Total SPA including estimate"), h("th", {}), h("th", { class: "num" }, (st.spaHours + st.unl.hours).toFixed(0)), h("th", { class: "num" }, (st.paw(st.spaHours) + st.unl.paw).toFixed(2))) : null))));
 
-  // By role vs job plan
-  const rolePlanned = Object.values(jp.roles || {}).reduce((a, b) => a + (+b || 0), 0);
-  const rr = roleRows(st);
-  body.append(h("div", { class: "card" }, h("h3", {}, "By role, against job plan"), h("div", { class: "tablewrap" }, h("table", {},
-    h("tr", {}, h("th", {}, "Role / project"), h("th", { class: "num" }, "Entries"), h("th", { class: "num" }, "Logged h"), h("th", { class: "num" }, "Logged PAs/wk"),
-      unl ? h("th", { class: "num" }, "+ Unlogged est.") : null, h("th", { class: "num" }, "Planned")),
-    ...rr.map(r => h("tr", {}, h("td", {}, r.name), h("td", { class: "num" }, r.n), h("td", { class: "num" }, r.hours),
-      h("td", { class: "num" }, r.paw), unl ? h("td", { class: "num" }, r.est) : null, h("td", { class: "num" }, r.planned))))),
-    h("p", { class: "muted small" }, `Job plan: ${jp.totalPAs} PAs/week; core SPA ${jp.spaPAs} + role PAs ${rolePlanned} = ${(+jp.spaPAs + rolePlanned).toFixed(2)} non-clinical PAs planned; ${st.paw(st.spaHours).toFixed(2)} logged${unl ? `, ${(st.paw(st.spaHours) + st.unl.paw).toFixed(2)} including the unlogged estimate` : ""}. Logged time is a minimum; an entry with several tags counts towards each.`)));
+  // Against job plan (each entry counted once)
+  const pr = planRows(st);
+  const cell = (r, v) => h(r.bold ? "th" : "td", { class: "num" }, v);
+  body.append(h("div", { class: "card" }, h("h3", {}, "Against job plan"), h("div", { class: "tablewrap" }, h("table", {},
+    h("tr", {}, h("th", {}, "Job plan item"), h("th", { class: "num" }, "Planned PAs/wk"), h("th", { class: "num" }, "Entries"), h("th", { class: "num" }, "Logged h"),
+      h("th", { class: "num" }, "Logged PAs/wk"), unl ? h("th", { class: "num" }, "+ Unlogged est.") : null, unl ? h("th", { class: "num" }, "Total") : null),
+    ...pr.map(r => h("tr", {}, r.bold ? h("th", {}, r.name) : h("td", {}, r.name), cell(r, r.planned), cell(r, r.n), cell(r, r.hours), cell(r, r.paw),
+      unl ? cell(r, r.est) : null, unl ? cell(r, r.total) : null)))),
+    h("p", { class: "muted small" }, `Job plan ${jp.totalPAs} PAs/week. Each entry counts once, towards the first item it matches (by keyword, then role tag); untagged entries count as core. Logged time is a minimum.`)));
+
+  // By role tag
+  body.append(h("div", { class: "card" }, h("h3", {}, "By role / project"), h("div", { class: "tablewrap" }, h("table", {},
+    h("tr", {}, h("th", {}, "Role / project"), h("th", { class: "num" }, "Entries"), h("th", { class: "num" }, "Logged h"), h("th", { class: "num" }, "Logged PAs/wk")),
+    ...tagRows(st).map(r => h("tr", {}, h("td", {}, r.name), h("td", { class: "num" }, r.n), h("td", { class: "num" }, r.hours), h("td", { class: "num" }, r.paw))))),
+    h("p", { class: "muted small" }, "An entry with several tags counts towards each, so these don't add up to the total.")));
 
   // Year on year
   body.append(yoyCard());
@@ -698,14 +742,14 @@ function yoyRows() {
   return { ps, codeRows, tagRows };
 }
 function yoyCard() {
-  const { ps, codeRows, tagRows } = yoyRows();
+  const { ps, codeRows, tagRows: yoyTagRows } = yoyRows();
   const tbl = rows => h("div", { class: "tablewrap" }, h("table", {},
     h("tr", {}, h("th", {}, ""), ...ps.map(p => h("th", { class: "num" }, p.short))),
     ...rows.map(r => h("tr", {}, (r.bold ? h("th", {}, r.name) : h("td", {}, r.name)),
       ...r.vals.map(v => h(r.bold ? "th" : "td", { class: "num" }, v ? v.toFixed(2) : "–"))))));
   return h("div", { class: "card" }, h("h3", {}, "Year on year (PAs per week)"),
     h("p", { class: "muted small" }, "Columns are appraisal years, labelled by the appraisal they led up to. Logged time only, so these are minimums; how much was logged varies between years (the weekly diary was kept in full until mid-2026)."),
-    tbl(codeRows), h("h3", { style: "margin-top:1rem" }, "By role"), tbl(tagRows));
+    tbl(codeRows), h("h3", { style: "margin-top:1rem" }, "By role"), tbl(yoyTagRows));
 }
 async function draftSummaries(p, secs) {
   const payload = secs.map(s => ({
@@ -772,17 +816,23 @@ async function makePDF() {
           ["", "Total SPA including estimate", "", (st.spaHours + st.unl.hours).toFixed(0), (st.paw(st.spaHours) + st.unl.paw).toFixed(2)]] : [])],
       columnStyles: { 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" } } });
 
-    heading("Roles and projects against job plan");
-    table({ head: [["Role / project", "Entries", "Logged h", "Logged PAs/wk", ...(unl ? ["+ Unlogged est. PAs/wk"] : []), "Planned PAs/wk"]],
-      body: roleRows(st).map(r => [r.name, r.n, r.hours, r.paw, ...(unl ? [r.est] : []), r.planned]),
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" }, 4: { halign: "right" }, 5: { halign: "right" } } });
+    heading("Against job plan");
+    const rightCols = n => Object.fromEntries(Array.from({ length: n }, (_, i) => [i + 1, { halign: "right" }]));
+    table({ head: [["Job plan item", "Planned PAs/wk", "Entries", "Logged h", "Logged PAs/wk", ...(unl ? ["+ Unlogged est.", "Total"] : [])]],
+      body: planRows(st).map(r => [r.name, r.planned, r.n, r.hours, r.paw, ...(unl ? [r.est, r.total] : [])]),
+      columnStyles: rightCols(unl ? 6 : 4),
+      didParseCell: d => { if (d.section === "body" && d.row.index === planRows(st).length - 1) d.cell.styles.fontStyle = "bold"; } });
+    para("Each entry counts once, towards the first job plan item it matches; untagged entries count as core SPA.", 8.5);
+    heading("By role / project");
+    table({ head: [["Role / project", "Entries", "Logged h", "Logged PAs/wk"]],
+      body: tagRows(st).map(r => [r.name, r.n, r.hours, r.paw]), columnStyles: rightCols(3) });
 
-    const { ps, codeRows, tagRows } = yoyRows();
+    const { ps, codeRows, tagRows: yoyTagRows } = yoyRows();
     heading("Year on year (logged PAs per week)");
     const yoyBody = rows => rows.map(r => [r.name, ...r.vals.map(v => v ? v.toFixed(2) : "–")]);
     const right = Object.fromEntries(ps.map((_, i) => [i + 1, { halign: "right" }]));
     table({ head: [["Activity code", ...ps.map(x => x.short)]], body: yoyBody(codeRows), columnStyles: right });
-    table({ head: [["Role / project", ...ps.map(x => x.short)]], body: yoyBody(tagRows), columnStyles: right });
+    table({ head: [["Role / project", ...ps.map(x => x.short)]], body: yoyBody(yoyTagRows), columnStyles: right });
 
     const secs = sectionsFor(st).filter(s => (rep.sections?.[s.key] || "").trim());
     if (secs.length) {
@@ -825,14 +875,10 @@ function renderSettings() {
     h("button", { class: "iconbtn", title: "Remove", onclick: () => { if (confirm("Remove this appraisal date?")) saveSettings({ appraisalDates: { [id]: deleteField() } }); } }, "✕")))
     : [h("p", { class: "muted small" }, "No dates yet.")]));
   // job plan
-  $("#jp-total").value = s.jobPlan.totalPAs; $("#jp-spa").value = s.jobPlan.spaPAs; $("#jp-weeks").value = s.jobPlan.weeksPerYear;
-  $("#jp-general").value = s.jobPlan.unlogged?._general ?? "";
+  $("#jp-total").value = s.jobPlan.totalPAs; $("#jp-weeks").value = s.jobPlan.weeksPerYear;
   $("#jp-unlogged-from").value = s.jobPlan.unloggedFrom || "2026-07-01";
-  $("#jp-roles").replaceChildren(
-    h("div", { class: "row small muted" }, h("span", {}, "Role"), h("span", { style: "flex:0 0 7rem" }, "Planned PAs/wk"), h("span", { style: "flex:0 0 7rem" }, "Unlogged h/wk")),
-    ...activeTags().map(t => h("div", { class: "row", style: "margin:.3rem 0" }, h("span", {}, t.name),
-      h("input", { type: "number", step: "0.25", min: "0", "data-tag": t.id, "data-kind": "pa", style: "flex:0 0 7rem", value: s.jobPlan.roles?.[t.id] ?? "" }),
-      h("input", { type: "number", step: "0.5", min: "0", "data-tag": t.id, "data-kind": "unlogged", style: "flex:0 0 7rem", value: s.jobPlan.unlogged?.[t.id] ?? "" }))));
+  if (!jpDraft || !jpDirty) jpDraft = JSON.parse(JSON.stringify(s.jobPlan.items || {}));
+  drawJobItems();
   // tags
   $("#tag-list").replaceChildren(...allTags().map(t => {
     const inp = h("input", { value: t.name, onchange: ev => saveSettings({ tags: { [t.id]: { name: ev.target.value.trim() || t.name } } }) });
@@ -850,15 +896,39 @@ $("#btn-add-appraisal").onclick = () => {
   if (appraisalDates().includes(d)) return toast("Already added");
   saveSettings({ appraisalDates: { [uid()]: { date: d } } }); $("#new-appraisal-date").value = ""; toast("Added");
 };
-$("#btn-save-jp").onclick = () => {
-  const roles = {}, unlogged = {};
-  for (const inp of document.querySelectorAll("#jp-roles input")) {
-    const v = inp.value === "" ? deleteField() : +inp.value;
-    if (inp.dataset.kind === "unlogged") unlogged[inp.dataset.tag] = v; else roles[inp.dataset.tag] = v;
-  }
-  unlogged._general = $("#jp-general").value === "" ? deleteField() : +$("#jp-general").value;
-  saveSettings({ jobPlan: { totalPAs: +$("#jp-total").value || 0, spaPAs: +$("#jp-spa").value || 0, weeksPerYear: +$("#jp-weeks").value || 42, roles, unlogged, unloggedFrom: $("#jp-unlogged-from").value || "2026-07-01" } });
-  toast("Job plan saved");
+let jpDraft = null, jpDirty = false;
+function drawJobItems() {
+  const items = Object.entries(jpDraft).sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99));
+  const num = (v, step, on) => h("input", { type: "number", step, min: "0", value: v ?? "", oninput: ev => { on(ev.target.value === "" ? null : +ev.target.value); jpDirty = true; } });
+  $("#jp-items").replaceChildren(...items.map(([id, it], idx) => {
+    const chips = h("div", { class: "chips" }, ...activeTags().map(t => h("button", { type: "button", class: "chip" + (it.tags?.[t.id] ? " on" : ""),
+      onclick: () => { it.tags ||= {}; if (it.tags[t.id]) delete it.tags[t.id]; else it.tags[t.id] = true; jpDirty = true; drawJobItems(); } }, t.name)));
+    return h("div", { class: "card", style: "background:var(--panel-2)" },
+      h("label", {}, "Item", h("input", { value: it.name || "", oninput: ev => { it.name = ev.target.value; jpDirty = true; } })),
+      h("div", { class: "row" }, h("label", {}, "Planned PAs/wk", num(it.pas, "0.0001", v => (it.pas = v))),
+        h("label", {}, "Unlogged h/wk (estimate)", num(it.unlogged, "0.5", v => (it.unlogged = v)))),
+      h("label", {}, "Counts entries tagged"), chips,
+      h("label", {}, "…or whose title contains (separate with ;)", h("input", { value: it.keywords || "", placeholder: "e.g. ICU forum", oninput: ev => { it.keywords = ev.target.value; jpDirty = true; } })),
+      h("label", { class: "include" }, h("input", { type: "checkbox", checked: !!it.core, onchange: ev => {
+        for (const x of Object.values(jpDraft)) x.core = false; it.core = ev.target.checked; jpDirty = true; drawJobItems(); } }),
+        "Core SPA: also counts untagged entries"),
+      h("div", { class: "actions" },
+        idx > 0 ? h("button", { onclick: () => { items.forEach(([, x], i) => (x.order = i)); items[idx - 1][1].order = idx; it.order = idx - 1; jpDirty = true; drawJobItems(); } }, "Move up") : null,
+        h("button", { class: "danger", onclick: () => { delete jpDraft[id]; jpDirty = true; drawJobItems(); } }, "Remove")));
+  }));
+}
+$("#btn-add-jp-item").onclick = () => {
+  jpDraft[uid().slice(0, 8)] = { name: "New item", pas: null, unlogged: null, tags: {}, keywords: "", core: false, order: Object.keys(jpDraft).length };
+  jpDirty = true; drawJobItems();
+};
+$("#btn-save-jp").onclick = async () => {
+  Object.entries(jpDraft).sort((a, b) => (a[1].order ?? 99) - (b[1].order ?? 99)).forEach(([, x], i) => (x.order = i));
+  const items = { ...jpDraft };
+  for (const id of Object.keys(state.settings.jobPlan.items || {})) if (!items[id]) items[id] = deleteField();
+  // replace each item whole so removed tags don't linger in the merge
+  for (const id of Object.keys(jpDraft)) await saveSettings({ jobPlan: { items: { [id]: deleteField() } } });
+  await saveSettings({ jobPlan: { totalPAs: +$("#jp-total").value || 0, weeksPerYear: +$("#jp-weeks").value || 42, items, unloggedFrom: $("#jp-unlogged-from").value || "2026-07-01" } });
+  jpDirty = false; toast("Job plan saved");
 };
 $("#btn-add-tag").onclick = () => {
   const name = $("#new-tag").value.trim(); if (!name) return;

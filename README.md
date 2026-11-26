@@ -50,7 +50,12 @@ You can rename, add or archive tags in Settings. An entry can carry several tags
 
 The log is for specific roles and blocks of protected time, not a full timesheet. Email, ad-hoc queries and short unscheduled tasks are mostly not itemised, so logged hours are a minimum, and the report and PDF say so.
 
-In **Settings → Job plan** you can add a rough estimate of the unlogged hours per week for each role, and for general email and admin. These estimates are shown in their own column and row, never mixed into logged hours. They only count from the date you set (default 1 July 2026, when the full weekly diary stopped), so earlier years aren't inflated.
+In **Settings → Job plan** you set your non-clinical job plan items. The defaults are:
+- ICU forum: 0.2857 PA/week, matched by "ICU forum" in the title
+- Digital lead: 1.5 PAs, matched by the EPR/ICCA and AI tags
+- Core SPA: 2 PAs, matched by the appraisal, teaching, HALO and research tags, plus any untagged entry
+
+Each entry counts once, towards the first item it matches. Tagged entries that match no item (e.g. governance, medico-legal) are shown as "Not in job plan". Each item can have a rough estimate of unlogged hours per week, shown in its own column and never mixed into logged hours. Estimates only count from the date you set (default 1 July 2026, when the full weekly diary stopped), so earlier years aren't inflated.
 
 ### Information governance
 

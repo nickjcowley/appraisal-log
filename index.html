@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="styles.css?v=1.1.1">
+<link rel="stylesheet" href="styles.css?v=1.2.0">
 </head>
 <body>
 
@@ -84,13 +84,12 @@
   <div class="card">
     <h3>Job plan</h3>
     <label>Total PAs per week <input id="jp-total" type="number" step="0.25" min="0"></label>
-    <label>Core SPA PAs per week <input id="jp-spa" type="number" step="0.25" min="0"></label>
     <label>Working weeks per year <input id="jp-weeks" type="number" step="1" min="1" max="52"></label>
-    <p class="muted small">For each role: the PAs in your job plan (blank if unpaid), and roughly how many hours a week go on it without being logged as entries, such as email and ad-hoc queries. The unlogged estimate is shown separately in the report and is never mixed into logged hours.</p>
-    <div id="jp-roles"></div>
-    <label>General email and admin not tied to a role, unlogged h/week <input id="jp-general" type="number" step="0.5" min="0"></label>
+    <p class="muted small">Your non-clinical job plan items. Each entry counts towards one item: the first one whose title keywords or role tags it matches. Untagged entries count as core SPA. The unlogged estimate (email, ad-hoc work) is shown separately in the report and never mixed into logged hours.</p>
+    <div id="jp-items"></div>
+    <button id="btn-add-jp-item">+ Add item</button>
     <label>Apply unlogged estimates from <input id="jp-unlogged-from" type="date"></label>
-    <p class="muted small">Your weekly diary logged nearly everything, email included, until the end of June 2026, so the estimate only counts from this date.</p>
+    <p class="muted small">Your weekly diary logged nearly everything, email included, until the end of June 2026, so estimates only count from this date.</p>
     <button id="btn-save-jp" class="primary">Save job plan</button>
   </div>
 
@@ -153,6 +152,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script type="module" src="app.js?v=1.1.1"></script>
+<script type="module" src="app.js?v=1.2.0"></script>
 </body>
 </html>
