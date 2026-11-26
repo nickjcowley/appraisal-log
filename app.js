@@ -1,10 +1,10 @@
 // Appraisal Log — non-clinical activity record for NHS appraisal and job planning.
 // Same architecture as PeopleLog: vanilla ES modules, Firebase Auth + Firestore (offline), Gemini REST, no build step.
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 
 // ───────────────────────────────────────────── 1. Firebase
-import { firebaseConfig } from "./firebase-config.js?v=1.2.0";
+import { firebaseConfig } from "./firebase-config.js?v=1.2.1";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
@@ -60,8 +60,9 @@ const DEFAULT_TAGS = [
 const DEFAULT_ITEMS = {
   forum: { name: "ICU forum (monthly half-day)", pas: 0.2857, unlogged: null, tags: {}, keywords: "ICU forum", core: false, order: 0 },
   digital: { name: "Digital lead (ICU EPR / ICCA, AI and digital projects)", pas: 1.5, unlogged: null, tags: { epr: true, ai: true }, keywords: "", core: false, order: 1 },
+  governance: { name: "ICU governance lead (incl. complaints, incidents, medico-legal)", pas: 1, unlogged: null, tags: { gov: true, legal: true }, keywords: "", core: false, order: 2 },
   core: { name: "Core SPA (CPD, appraisal, revalidation, teaching, audit)", pas: 2, unlogged: null,
-    tags: { appr: true, teach: true, "halo-sed": true, "halo-res": true, research: true }, keywords: "", core: true, order: 2 }
+    tags: { appr: true, teach: true, "halo-sed": true, "halo-res": true, research: true }, keywords: "", core: true, order: 3 }
 };
 const DEFAULT_JOBPLAN = { totalPAs: 10.25, weeksPerYear: 42, unloggedFrom: "2026-07-01", items: DEFAULT_ITEMS };
 const DEFAULT_MODEL = "gemini-flash-latest";
@@ -252,7 +253,11 @@ function startListeners() {
     state.settings = normaliseSettings(s);
     if (!snap.exists() && !snap.metadata.fromCache) seedSettings();
     else if (snap.exists() && !snap.metadata.fromCache && !s.jobPlan?.items) // one-off upgrade from the v1.1 job plan format
-      saveSettings({ jobPlan: { items: DEFAULT_ITEMS, unloggedFrom: s.jobPlan?.unloggedFrom || "2026-07-01", spaPAs: deleteField(), roles: deleteField(), unlogged: deleteField() } });
+      saveSettings({ jobPlan: { items: DEFAULT_ITEMS, govAdded: true, unloggedFrom: s.jobPlan?.unloggedFrom || "2026-07-01", spaPAs: deleteField(), roles: deleteField(), unlogged: deleteField() } });
+    else if (snap.exists() && !snap.metadata.fromCache && s.jobPlan?.items && !s.jobPlan.items.governance && !s.jobPlan.govAdded) { // one-off: add governance lead (1 PA) to v1.2.0 plans
+      const order = s.jobPlan.items.core?.order ?? 2;
+      saveSettings({ jobPlan: { govAdded: true, items: { governance: { ...DEFAULT_ITEMS.governance, order: order - 0.5 } } } });
+    }
     renderAll();
   }));
   state.unsub.push(onSnapshot(userCol("entries"), { includeMetadataChanges: true }, snap => {
@@ -641,7 +646,7 @@ function planRows(st) {
       paw: f(st.paw(v.hours)), est: est ? f(est) : "–", total: f(st.paw(v.hours) + est) };
   });
   const none = st.byItem._none;
-  if (none) rows.push({ name: "Not in job plan (e.g. governance, medico-legal)", planned: "–", n: none.n, hours: none.hours.toFixed(1),
+  if (none) rows.push({ name: "Not in job plan", planned: "–", n: none.n, hours: none.hours.toFixed(1),
     paw: f(st.paw(none.hours)), est: "–", total: f(st.paw(none.hours)) });
   const planned = jobItems().reduce((a, i) => a + (+i.pas || 0), 0);
   rows.push({ name: "Total non-clinical", planned: f(planned), n: st.list.filter(e => !NON_SPA.has(e.code)).length, hours: st.spaHours.toFixed(1),
