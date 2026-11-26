@@ -1,10 +1,10 @@
 // Appraisal Log — non-clinical activity record for NHS appraisal and job planning.
 // Same architecture as PeopleLog: vanilla ES modules, Firebase Auth + Firestore (offline), Gemini REST, no build step.
 
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 
 // ───────────────────────────────────────────── 1. Firebase
-import { firebaseConfig } from "./firebase-config.js?v=1.2.1";
+import { firebaseConfig } from "./firebase-config.js?v=1.2.2";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult,
@@ -468,7 +468,12 @@ function entryForm(e, { review = false, newTagNames = [] } = {}) {
     h("label", {}, "Title", title),
     h("label", {}, "Detail", text),
     h("label", {}, "Reflection", refl),
-    h("label", {}, "Evidence"), evBox,
+    h("label", {}, "Evidence"),
+    h("details", { class: "muted small", style: "margin:.2rem 0 .4rem" }, h("summary", {}, "How evidence links work"),
+      h("p", {}, "The file stays in OneDrive; this just records where it is, and it's listed under the entry in the PDF report."),
+      h("p", {}, "Folder path: type the file name after the folder already filled in. Quick, but not clickable."),
+      h("p", {}, "Share link: in OneDrive choose Share → Copy link (on a phone, tap ⋯ → Share) and paste it here. You get a ↗ button that opens the file on any device, for you only unless you share it. Share links survive renaming or moving the file; paths don't.")),
+    evBox,
     e.importRef ? h("p", { class: "muted small" }, "Imported from " + e.importRef + (e.origCode ? ` (code ${e.origCode})` : "")) : null
   ].filter(Boolean));
   wrap.getValue = () => ({

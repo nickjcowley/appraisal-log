@@ -1,12 +1,12 @@
 // Appraisal Log service worker.
 // Release checklist: bump CACHE_NAME and the ?v= numbers here AND in index.html / app.js imports.
-const CACHE_NAME = "appraisallog-v1.2.1";
+const CACHE_NAME = "appraisallog-v1.2.2";
 const APP_FILES = [
   "./",
   "./index.html",
-  "./styles.css?v=1.2.1",
-  "./app.js?v=1.2.1",
-  "./firebase-config.js?v=1.2.1",
+  "./styles.css?v=1.2.2",
+  "./app.js?v=1.2.2",
+  "./firebase-config.js?v=1.2.2",
   "./manifest.json",
   "./icon.svg",
   "./icon-192.png",
