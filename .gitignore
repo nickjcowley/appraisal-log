@@ -1,0 +1,3 @@
+# Personal data exports must never be committed to this public repo
+*-import.json
+appraisal-log-backup-*.json

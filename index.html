@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12161c">
+<title>Appraisal Log</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css?v=1.1.0">
+</head>
+<body>
+
+<header id="topbar" hidden>
+  <button id="nav-home" class="brand" title="Home">Appraisal Log</button>
+  <span id="sync-pill" class="pill">Synced</span>
+  <nav>
+    <button id="nav-report" class="iconbtn" title="Appraisal report">📊</button>
+    <button id="nav-settings" class="iconbtn" title="Settings">⚙︎</button>
+  </nav>
+</header>
+
+<!-- Setup needed (Firebase config placeholder) -->
+<section id="screen-setup" class="screen" hidden>
+  <div class="card centre">
+    <h1>Almost there</h1>
+    <p>Firebase isn't configured yet. Edit <code>firebase-config.js</code> in the GitHub repo and paste in the config object from your new Firebase project (Project settings → Your apps → Web app). See README.md for the full steps.</p>
+  </div>
+</section>
+
+<!-- Sign in -->
+<section id="screen-signin" class="screen" hidden>
+  <div class="card centre">
+    <img src="icon.svg" alt="" width="72" height="72">
+    <h1>Appraisal Log</h1>
+    <p class="muted">Non-clinical activity record for appraisal and job planning.</p>
+    <button id="btn-signin" class="primary big">Sign in with Google</button>
+    <p id="signin-error" class="error" hidden></p>
+  </div>
+</section>
+
+<!-- Home -->
+<section id="screen-home" class="screen" hidden>
+  <div class="period-bar">
+    <select id="home-period" aria-label="Appraisal year"></select>
+  </div>
+  <div id="home-summary" class="summary"></div>
+  <div class="filters">
+    <input id="search" type="search" placeholder="Search entries…" autocomplete="off">
+    <div class="row">
+      <select id="filter-code" aria-label="Filter by code"><option value="">All codes</option></select>
+      <select id="filter-tag" aria-label="Filter by role"><option value="">All roles</option><option value="__none">No role tag</option></select>
+    </div>
+  </div>
+  <div id="entry-list"></div>
+  <button id="fab" class="fab" title="New entry">✎</button>
+</section>
+
+<!-- Report -->
+<section id="screen-report" class="screen" hidden>
+  <h2>Appraisal report</h2>
+  <div class="row">
+    <select id="report-period" aria-label="Appraisal year"></select>
+    <button id="btn-pdf" class="primary">Download PDF</button>
+  </div>
+  <div id="report-body"></div>
+</section>
+
+<!-- Settings -->
+<section id="screen-settings" class="screen" hidden>
+  <h2>Settings</h2>
+
+  <div class="card">
+    <h3>Appraisal dates</h3>
+    <p class="muted small">Each appraisal year runs from one appraisal date to the next. Add your next appraisal date when it's booked.</p>
+    <div id="appraisal-dates"></div>
+    <div class="row">
+      <input id="new-appraisal-date" type="date">
+      <button id="btn-add-appraisal">Add date</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Job plan</h3>
+    <label>Total PAs per week <input id="jp-total" type="number" step="0.25" min="0"></label>
+    <label>Core SPA PAs per week <input id="jp-spa" type="number" step="0.25" min="0"></label>
+    <label>Working weeks per year <input id="jp-weeks" type="number" step="1" min="1" max="52"></label>
+    <p class="muted small">For each role: the PAs in your job plan (blank if unpaid), and roughly how many hours a week go on it without being logged as entries, such as email and ad-hoc queries. The unlogged estimate is shown separately in the report and is never mixed into logged hours.</p>
+    <div id="jp-roles"></div>
+    <label>General email and admin not tied to a role, unlogged h/week <input id="jp-general" type="number" step="0.5" min="0"></label>
+    <label>Apply unlogged estimates from <input id="jp-unlogged-from" type="date"></label>
+    <p class="muted small">Your weekly diary logged nearly everything, email included, until the end of June 2026, so the estimate only counts from this date.</p>
+    <button id="btn-save-jp" class="primary">Save job plan</button>
+  </div>
+
+  <div class="card">
+    <h3>Role / project tags</h3>
+    <div id="tag-list"></div>
+    <div class="row">
+      <input id="new-tag" placeholder="New tag name">
+      <button id="btn-add-tag">Add</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Report</h3>
+    <label>Name on report <input id="report-name"></label>
+    <label>Default evidence folder <input id="evidence-base" placeholder="Appraisals COWLEY\Appraisal 2027"></label>
+    <button id="btn-save-report-settings" class="primary">Save</button>
+  </div>
+
+  <div class="card">
+    <h3>Gemini</h3>
+    <label>API key <input id="gemini-key" type="password" autocomplete="off"></label>
+    <label>Model <input id="gemini-model" placeholder="gemini-flash-latest"></label>
+    <button id="btn-save-gemini" class="primary">Save</button>
+    <p class="muted small">Text you send for suggestions or summaries goes to Google Gemini. Never include patient-identifiable information.</p>
+  </div>
+
+  <div class="card">
+    <h3>Import diary history</h3>
+    <p class="muted small">Choose the <code>appraisal-history-import.json</code> file made from your work diary spreadsheets. Re-importing the same file updates entries rather than duplicating them.</p>
+    <input id="import-file" type="file" accept=".json,application/json">
+    <div id="import-preview"></div>
+  </div>
+
+  <div class="card">
+    <h3>Backup</h3>
+    <div class="row">
+      <button id="btn-backup">Download backup</button>
+      <label class="filebtn">Restore… <input id="restore-file" type="file" accept=".json" hidden></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="muted small" id="signed-in-as"></p>
+    <button id="btn-signout" class="danger">Sign out and clear this device</button>
+    <p class="muted small" id="version"></p>
+  </div>
+</section>
+
+<!-- Modal shell -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-inner">
+    <div class="modal-head">
+      <h2 id="modal-title"></h2>
+      <button id="modal-close" class="iconbtn" title="Close">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="app.js?v=1.1.0"></script>
+</body>
+</html>
